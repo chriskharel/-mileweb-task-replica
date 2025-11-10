@@ -1,3 +1,5 @@
+console.log('[debug] heroLogic module loaded');
+
 export class SoundManager {
   constructor() {
     this.sounds = {};
@@ -6,9 +8,11 @@ export class SoundManager {
   }
 
   init() {
-    this.loadSound('hover', 'https://assets.codepen.io/7558/click-reverb-001.mp3');
-    this.loadSound('click', 'https://assets.codepen.io/7558/shutter-fx-001.mp3');
-    this.loadSound('textChange', 'https://assets.codepen.io/7558/whoosh-fx-001.mp3');
+    // Use remote URLs directly from CodePen assets
+    const remoteBase = 'https://assets.codepen.io/7558/';
+    this.loadSound('hover', `${remoteBase}click-reverb-001.mp3`);
+    this.loadSound('click', `${remoteBase}shutter-fx-001.mp3`);
+    this.loadSound('textChange', `${remoteBase}whoosh-fx-001.mp3`);
   }
 
   loadSound(name, url) {
@@ -25,15 +29,7 @@ export class SoundManager {
   enableAudio() {
     if (!this.isEnabled) {
       this.isEnabled = true;
-      // unlock audio on user gesture
-      Object.values(this.sounds).forEach((a) => {
-        a.play().catch(() => {
-          a.pause();
-          a.currentTime = 0;
-        });
-        a.pause();
-        a.currentTime = 0;
-      });
+      console.log('Audio enabled');
     }
   }
 
@@ -41,20 +37,17 @@ export class SoundManager {
     if (this.isEnabled && this.sounds[soundName]) {
       if (delay > 0) {
         setTimeout(() => {
-          try {
-            this.sounds[soundName].currentTime = 0;
-            this.sounds[soundName].play();
-          } catch (e) {
-            // ignore
-          }
+          this.sounds[soundName].currentTime = 0;
+          this.sounds[soundName].play().catch((e) => {
+            console.log('Audio play failed:', e);
+          });
         }, delay);
       } else {
-        try {
-          this.sounds[soundName].currentTime = 0;
-          this.sounds[soundName].play();
-        } catch (e) {
-          // ignore
-        }
+        // Reset the audio to beginning and play immediately
+        this.sounds[soundName].currentTime = 0;
+        this.sounds[soundName].play().catch((e) => {
+          console.log('Audio play failed:', e);
+        });
       }
     }
   }
@@ -68,17 +61,22 @@ export class SoundManager {
 export const soundManager = new SoundManager();
 
 export async function initPage() {
+  console.log('[debug] initPage called');
   // dynamic import GSAP and Lenis (robustly handle default vs named exports)
   const gsapModule = await import('gsap');
+  console.log('[debug] gsap imported');
   const gsap = gsapModule.default || gsapModule.gsap || gsapModule;
   // import plugins
   const ScrollTriggerModule = await import('gsap/ScrollTrigger');
+  console.log('[debug] ScrollTrigger imported');
   const ScrollTrigger = ScrollTriggerModule.default || ScrollTriggerModule.ScrollTrigger || ScrollTriggerModule;
   let CustomEaseModule;
   try {
     CustomEaseModule = await import('gsap/CustomEase');
+    console.log('[debug] CustomEase imported');
   } catch (e) {
     CustomEaseModule = null;
+    console.log('[debug] CustomEase not available');
   }
   const CustomEase = CustomEaseModule && (CustomEaseModule.default || CustomEaseModule.CustomEase || CustomEaseModule);
   if (CustomEase) {
@@ -91,39 +89,54 @@ export async function initPage() {
   }
 
   gsap.registerPlugin(ScrollTrigger);
+  console.log('[debug] gsap plugins registered');
 
   const LenisModule = await import('@studio-freight/lenis');
+  console.log('[debug] Lenis imported');
   const Lenis = LenisModule.default || LenisModule;
 
-  // small helper functions and initialization similar to CodePen
+  // Loading counter animation
   const loadingOverlay = document.getElementById('loading-overlay');
   const loadingCounter = document.getElementById('loading-counter');
   let counter = 0;
+  // Animate counter from 00 to 100
   const counterInterval = setInterval(() => {
-    counter += Math.random() * 3 + 1;
+    counter += Math.random() * 3 + 1; // Random increment for realistic feel
     if (counter >= 100) {
       counter = 100;
       clearInterval(counterInterval);
+      // When counter reaches 100, start fade out
       setTimeout(() => {
-        // fade out counter and overlay
-        const counterEl = loadingOverlay.querySelector('.loading-counter');
-        if (counterEl) {
-          gsap.to(counterEl, { opacity: 0, y: -20, duration: 0.6, ease: 'power2.inOut' });
-        }
-        gsap.to(loadingOverlay, {
+        // First animate the loading text out
+        gsap.to(loadingOverlay.querySelector('.loading-counter'), {
           opacity: 0,
-          y: '-100%',
-          duration: 1.2,
-          ease: 'power3.inOut',
-          delay: 0.3,
+          y: -20,
+          duration: 0.6,
+          ease: 'power2.inOut'
+        });
+        gsap.to(loadingOverlay.childNodes[0], {
+          opacity: 0,
+          y: -20,
+          duration: 0.6,
+          ease: 'power2.inOut',
           onComplete: () => {
-            loadingOverlay.style.display = 'none';
-            animateColumns();
+            // Then slide overlay up and out to reveal content
+            gsap.to(loadingOverlay, {
+              y: '-100%',
+              duration: 1.2,
+              ease: 'power3.inOut',
+              delay: 0.3,
+              onComplete: () => {
+                loadingOverlay.style.display = 'none';
+                // Start staggered animation for left and right columns
+                animateColumns();
+              }
+            });
           }
         });
-      }, 200);
+      }, 200); // Small delay after reaching 100
     }
-    if (loadingCounter) loadingCounter.textContent = `[${Math.floor(counter).toString().padStart(2, '0')}]`;
+    if (loadingCounter) loadingCounter.textContent = `[${counter.toFixed(0).padStart(2, '0')}]`;
   }, 30);
 
   // Lenis init
@@ -159,85 +172,90 @@ export async function initPage() {
   const progressFill = document.getElementById('progress-fill');
   const currentSectionDisplay = document.getElementById('current-section');
 
-  // Lightweight SplitText replacement: split each featured h3 into word spans
-  const splitTexts = {};
-  featuredContents.forEach((content, index) => {
-    const h3 = content.querySelector('h3');
-    if (!h3) return;
-    const words = h3.textContent.trim().split(/\s+/);
-    h3.textContent = '';
-    const wordEls = [];
-    words.forEach((w) => {
-      const mask = document.createElement('span');
-      mask.className = 'word-mask';
-      mask.style.display = 'inline-block';
-      mask.style.overflow = 'hidden';
-      const word = document.createElement('span');
-      word.className = 'split-word';
-      word.textContent = w + ' ';
-      mask.appendChild(word);
-      h3.appendChild(mask);
-      wordEls.push(word);
-    });
-    splitTexts[`featured-${index}`] = wordEls;
-    // set initial state for non-active
-    if (index !== 0) {
-      gsap.set(wordEls, { yPercent: 100, opacity: 0 });
-    } else {
-      gsap.set(wordEls, { yPercent: 0, opacity: 1 });
-    }
-  });
 
-  // shorten initial loaded stagger for snappier appearance
+  // Split text into words for animation (manual SplitText replacement)
+  const splitTexts = {};
+  try {
+    featuredContents.forEach((content, index) => {
+      const h3 = content.querySelector('h3');
+      if (h3) {
+        const words = h3.textContent.trim().split(/\s+/);
+        h3.textContent = '';
+        const wordEls = [];
+        words.forEach((w) => {
+          const mask = document.createElement('span');
+          mask.className = 'word-mask';
+          mask.style.display = 'inline-block';
+          mask.style.overflow = 'hidden';
+          const word = document.createElement('span');
+          word.className = 'split-word';
+          word.textContent = w + ' ';
+          mask.appendChild(word);
+          h3.appendChild(mask);
+          wordEls.push(word);
+        });
+        splitTexts[`featured-${index}`] = wordEls;
+        // Set initial state
+        if (index !== 0) {
+          gsap.set(wordEls, {
+            yPercent: 100,
+            opacity: 0
+          });
+        } else {
+          gsap.set(wordEls, {
+            yPercent: 0,
+            opacity: 1
+          });
+        }
+      }
+    });
+  } catch (error) {
+    console.error('SplitText error:', error);
+  }
+
+  // Function to animate columns with stagger
   function animateColumns() {
     const artistItems = document.querySelectorAll('.artist');
     const categoryItems = document.querySelectorAll('.category');
+    // Animate left column (artists) first
     artistItems.forEach((item, index) => {
       setTimeout(() => {
         item.classList.add('loaded');
-      }, index * 45);
+      }, index * 60);
     });
+    // Animate right column (categories) with slight delay
     categoryItems.forEach((item, index) => {
       setTimeout(() => {
         item.classList.add('loaded');
-      }, index * 45 + 150);
+      }, index * 60 + 200); // 200ms delay after artists start
     });
   }
 
+  // Function to update progress numbers
+  function updateProgressNumbers() {
+    if (currentSectionDisplay) {
+      currentSectionDisplay.textContent = (currentSection + 1).toString().padStart(2, '0');
+    }
+  }
+
+  // Calculate exact scroll positions for each section
+  gsap.set(fixedContainer, {
+    height: '100vh'
+  });
+
   const fixedSectionTop = fixedSectionElement ? fixedSectionElement.offsetTop : 0;
-  const fixedSectionHeight = fixedSectionElement ? fixedSectionElement.offsetHeight : window.innerHeight * 11; // fallback
+  const fixedSectionHeight = fixedSectionElement ? fixedSectionElement.offsetHeight : window.innerHeight * 11;
   let currentSection = 0;
   let isAnimating = false;
   let isSnapping = false;
   let lastProgress = 0;
   let scrollDirection = 0;
   let sectionPositions = [];
-
-  // compute section positions, used for snapping; call on init and on resize
-  function computeSectionPositions() {
-    const top = fixedSectionElement ? fixedSectionElement.offsetTop : 0;
-    const height = fixedSectionElement ? fixedSectionElement.offsetHeight : window.innerHeight * 11;
-    const size = Math.max(1, Math.round(height / 10));
-    sectionPositions = [];
-    for (let i = 0; i < 10; i++) {
-      sectionPositions.push(Math.round(top + size * i));
-    }
+  
+  // Each section takes 10% of the total scroll distance
+  for (let i = 0; i < 10; i++) {
+    sectionPositions.push(fixedSectionTop + (fixedSectionHeight * i) / 10);
   }
-  computeSectionPositions();
-
-  // refresh positions on resize to avoid snapping errors
-  function onResize() {
-    computeSectionPositions();
-    try {
-      ScrollTrigger.refresh();
-    } catch (e) {
-      // ignore if not available yet
-    }
-    try {
-      if (lenis && typeof lenis.resize === 'function') lenis.resize();
-    } catch (e) {}
-  }
-  window.addEventListener('resize', onResize);
 
   // cleanup: if the page will ever unmount, user can remove listener via window.removeEventListener('resize', onResize)
 
@@ -302,121 +320,181 @@ export async function initPage() {
     });
   }
 
-  // refined changeSection using a gsap timeline for coordinated animations
   function changeSection(newSection) {
     if (newSection === currentSection || isAnimating) return;
     isAnimating = true;
     const isScrollingDown = newSection > currentSection;
     const previousSection = currentSection;
     currentSection = newSection;
+
+    // Update progress numbers
     updateProgressNumbers();
+
+    // Update progress fill based on current section
     const sectionProgress = currentSection / 9;
     if (progressFill) progressFill.style.width = `${sectionProgress * 100}%`;
 
-    // prepare values
-    const ease = CustomEase ? 'customEase' : 'power2.out';
-    const t = gsap.timeline({ defaults: { ease } });
+    if (debugInfo) debugInfo.textContent = `Changing to Section: ${newSection} (${isScrollingDown ? 'Down' : 'Up'})`;
 
-    // hide non-relevant featured contents immediately (keep new and prev)
+    // Hide non-relevant featured contents
     featuredContents.forEach((content, i) => {
       if (i !== newSection && i !== previousSection) {
         content.classList.remove('active');
-        gsap.set(content, { visibility: 'hidden', opacity: 0 });
+        gsap.set(content, {
+          visibility: 'hidden',
+          opacity: 0
+        });
       }
     });
 
-    // animate previous featured words out (if any)
-    const prevWords = splitTexts[`featured-${previousSection}`] || [];
-    if (prevWords.length) {
-      t.to(prevWords, {
-        yPercent: isScrollingDown ? -100 : 100,
-        opacity: 0,
-        duration: duration * 0.45,
-        stagger: isScrollingDown ? 0.025 : -0.025
-      }, 0);
-      // hide previous content slightly after
-      t.add(() => {
-        if (featuredContents[previousSection]) {
-          featuredContents[previousSection].classList.remove('active');
-          gsap.set(featuredContents[previousSection], { visibility: 'hidden' });
-        }
-      }, duration * 0.45);
+    // Animate previous featured words out (if any)
+    if (previousSection !== null && previousSection !== undefined) {
+      const prevWords = splitTexts[`featured-${previousSection}`] || [];
+      if (prevWords && prevWords.length) {
+        gsap.to(prevWords, {
+          yPercent: isScrollingDown ? -100 : 100,
+          opacity: 0,
+          duration: duration * 0.6,
+          stagger: isScrollingDown ? 0.03 : -0.03,
+          ease: CustomEase ? 'customEase' : 'power2.out',
+          onComplete: () => {
+            if (featuredContents[previousSection]) {
+              featuredContents[previousSection].classList.remove('active');
+              gsap.set(featuredContents[previousSection], {
+                visibility: 'hidden'
+              });
+            }
+          }
+        });
+      }
     }
 
-    // reveal new words with stagger
+    // Reveal new words with stagger
     const newWords = splitTexts[`featured-${newSection}`] || [];
-    if (newWords.length) {
-      // ensure content is visible before anim
-      if (featuredContents[newSection]) featuredContents[newSection].classList.add('active');
-      gsap.set(newWords, { yPercent: isScrollingDown ? 100 : -100, opacity: 0 });
-      t.to(newWords, {
+    if (newWords && newWords.length) {
+      // Play text change sound with a 250ms delay to avoid overlapping with click sound
+      soundManager.play('textChange', 250);
+
+      featuredContents[newSection].classList.add('active');
+      gsap.set(featuredContents[newSection], {
+        visibility: 'visible',
+        opacity: 1
+      });
+      gsap.set(newWords, {
+        yPercent: isScrollingDown ? 100 : -100,
+        opacity: 0
+      });
+      gsap.to(newWords, {
         yPercent: 0,
         opacity: 1,
         duration: duration,
-        stagger: isScrollingDown ? 0.045 : -0.045
-      }, Math.max(0, 0.08));
+        stagger: isScrollingDown ? 0.05 : -0.05,
+        ease: CustomEase ? 'customEase' : 'power2.out'
+      });
     }
 
-    // backgrounds: clip / opacity / parallax
+    // Backgrounds: clip / opacity / parallax
     backgrounds.forEach((bg, i) => {
-      // clear classes so timeline controls visuals
-      gsap.killTweensOf(bg);
+      bg.classList.remove('previous', 'active');
       if (i === newSection) {
-        gsap.set(bg, { opacity: 1, y: 0 });
-        const fromClip = isScrollingDown ? 'inset(100% 0 0 0)' : 'inset(0 0 100% 0)';
-        const toClip = 'inset(0% 0 0 0)';
-        t.set(bg, { clipPath: fromClip }, 0);
-        t.to(bg, { clipPath: toClip, duration }, 0.02);
-        t.set(bg, { className: '+=active' }, 0);
+        if (isScrollingDown) {
+          gsap.set(bg, {
+            opacity: 1,
+            y: 0,
+            clipPath: 'inset(100% 0 0 0)'
+          });
+          gsap.to(bg, {
+            clipPath: 'inset(0% 0 0 0)',
+            duration: duration,
+            ease: CustomEase ? 'customEase' : 'power2.out'
+          });
+        } else {
+          gsap.set(bg, {
+            opacity: 1,
+            y: 0,
+            clipPath: 'inset(0 0 100% 0)'
+          });
+          gsap.to(bg, {
+            clipPath: 'inset(0 0 0% 0)',
+            duration: duration,
+            ease: CustomEase ? 'customEase' : 'power2.out'
+          });
+        }
+        bg.classList.add('active');
       } else if (i === previousSection) {
-        t.set(bg, { className: '+=previous' }, 0);
-        t.to(bg, { y: isScrollingDown ? `${parallaxAmount}%` : `-${parallaxAmount}%`, duration: duration * 0.9 }, 0);
-        t.to(bg, { opacity: 0, delay: duration * 0.35, duration: duration * 0.45 }, duration * 0.35);
-        t.add(() => { bg.classList.remove('previous'); gsap.set(bg, { y: 0 }); }, duration * 0.9);
+        bg.classList.add('previous');
+        gsap.to(bg, {
+          y: isScrollingDown ? `${parallaxAmount}%` : `-${parallaxAmount}%`,
+          duration: duration,
+          ease: CustomEase ? 'customEase' : 'power2.out'
+        });
+        gsap.to(bg, {
+          opacity: 0,
+          delay: duration * 0.5,
+          duration: duration * 0.5,
+          ease: CustomEase ? 'customEase' : 'power2.out',
+          onComplete: () => {
+            bg.classList.remove('previous');
+            gsap.set(bg, {
+              y: 0
+            });
+            isAnimating = false;
+          }
+        });
       } else {
-        t.to(bg, { opacity: 0, duration: duration * 0.3 }, 0);
+        gsap.to(bg, {
+          opacity: 0,
+          duration: duration * 0.3,
+          ease: CustomEase ? 'customEase' : 'power2.out'
+        });
       }
     });
 
-    // artists and categories states
+    // Artists and categories states
     artists.forEach((artist, i) => {
       if (i === newSection) {
-        t.to(artist, { opacity: 1, duration: 0.28 }, 0.02);
-        t.add(() => artist.classList.add('active'), 0.02);
+        artist.classList.add('active');
+        gsap.to(artist, {
+          opacity: 1,
+          duration: 0.3,
+          ease: 'power2.out'
+        });
       } else {
-        t.to(artist, { opacity: 0.3, duration: 0.28 }, 0.02);
-        t.add(() => artist.classList.remove('active'), 0.02);
+        artist.classList.remove('active');
+        gsap.to(artist, {
+          opacity: 0.3,
+          duration: 0.3,
+          ease: 'power2.out'
+        });
       }
     });
 
     categories.forEach((category, i) => {
       if (i === newSection) {
-        t.to(category, { opacity: 1, duration: 0.28 }, 0.02);
-        t.add(() => category.classList.add('active'), 0.02);
+        category.classList.add('active');
+        gsap.to(category, {
+          opacity: 1,
+          duration: 0.3,
+          ease: 'power2.out'
+        });
       } else {
-        t.to(category, { opacity: 0.3, duration: 0.28 }, 0.02);
-        t.add(() => category.classList.remove('active'), 0.02);
+        category.classList.remove('active');
+        gsap.to(category, {
+          opacity: 0.3,
+          duration: 0.3,
+          ease: 'power2.out'
+        });
       }
     });
-
-    // when timeline completes, ensure isAnimating cleared and debug
-    t.eventCallback('onComplete', () => {
-      isAnimating = false;
-    });
-
-    // play small click/text sound with slight sync
-    soundManager.play('textChange', 200);
   }
 
-  document.addEventListener('click', () => {
-    soundManager.enableAudio();
-  }, { once: true });
-
+  // Add click and hover handlers for navigation
   artists.forEach((artist, index) => {
     artist.addEventListener('click', (e) => {
       e.preventDefault();
       navigateToSection(index);
     });
+
     artist.addEventListener('mouseenter', () => {
       soundManager.enableAudio();
       soundManager.play('hover');
@@ -428,11 +506,17 @@ export async function initPage() {
       e.preventDefault();
       navigateToSection(index);
     });
+
     category.addEventListener('mouseenter', () => {
       soundManager.enableAudio();
       soundManager.play('hover');
     });
   });
+
+  // Enable audio on any user interaction
+  document.addEventListener('click', () => {
+    soundManager.enableAudio();
+  }, { once: true });
 
   const progressBarTrigger = ScrollTrigger.create({
     trigger: '.scroll-container',
@@ -460,18 +544,52 @@ export async function initPage() {
         featured.classList.remove('blur');
       }
 
+      // Only start unpinning when we're actually in the end section
       if (self.progress > 0.1) {
-        const newHeight = Math.max(0, 100 - (self.progress - 0.1) * 90);
-        gsap.to(fixedContainer, { height: `${newHeight}vh`, duration: 0.1, ease: 'power1.out' });
-        const moveY = (-(self.progress - 0.1) * 0.9) * 200;
-        gsap.to(header, { y: moveY * 1.5, duration: 0.1, ease: 'power1.out' });
-        gsap.to(content, { y: `calc(${moveY}px + (-50%))`, duration: 0.1, ease: 'power1.out' });
-        gsap.to(footer, { y: moveY * 0.5, duration: 0.1, ease: 'power1.out' });
+        const newHeight = Math.max(0, 100 - ((self.progress - 0.1) / 0.9) * 100);
+        gsap.to(fixedContainer, {
+          height: `${newHeight}vh`,
+          duration: 0.1,
+          ease: 'power1.out'
+        });
+        const moveY = (-(self.progress - 0.1) / 0.9) * 200;
+        gsap.to(header, {
+          y: moveY * 1.5,
+          duration: 0.1,
+          ease: 'power1.out'
+        });
+        gsap.to(content, {
+          y: `calc(${moveY}px + (-50%))`,
+          duration: 0.1,
+          ease: 'power1.out'
+        });
+        gsap.to(footer, {
+          y: moveY * 0.5,
+          duration: 0.1,
+          ease: 'power1.out'
+        });
       } else {
-        gsap.to(fixedContainer, { height: '100vh', duration: 0.1, ease: 'power1.out' });
-        gsap.to(header, { y: 0, duration: 0.1, ease: 'power1.out' });
-        gsap.to(content, { y: '-50%', duration: 0.1, ease: 'power1.out' });
-        gsap.to(footer, { y: 0, duration: 0.1, ease: 'power1.out' });
+        // Reset positions when scrolling back up
+        gsap.to(fixedContainer, {
+          height: '100vh',
+          duration: 0.1,
+          ease: 'power1.out'
+        });
+        gsap.to(header, {
+          y: 0,
+          duration: 0.1,
+          ease: 'power1.out'
+        });
+        gsap.to(content, {
+          y: '-50%',
+          duration: 0.1,
+          ease: 'power1.out'
+        });
+        gsap.to(footer, {
+          y: 0,
+          duration: 0.1,
+          ease: 'power1.out'
+        });
       }
     }
   });
@@ -482,7 +600,13 @@ export async function initPage() {
     }
   });
 
-  window.addSound = function (name, url, volume = 0.3) {
-    soundManager.addSound(name, url, volume);
-  };
+  // Initialize progress numbers
+  updateProgressNumbers();
+
+  if (debugInfo) debugInfo.textContent = 'Current Section: 0 (Initial)';
 }
+
+// Global access to sound manager for adding more sounds later
+window.addSound = function (name, url, volume = 0.3) {
+  soundManager.addSound(name, url, volume);
+};
