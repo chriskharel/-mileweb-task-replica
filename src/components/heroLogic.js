@@ -68,13 +68,32 @@ export class SoundManager {
 export const soundManager = new SoundManager();
 
 export async function initPage() {
-  // dynamic import GSAP and Lenis
-  const [{ gsap }, { default: Lenis }] = await Promise.all([
-    import('gsap'),
-    import('@studio-freight/lenis')
-  ]);
-  const { ScrollTrigger } = await import('gsap/ScrollTrigger');
+  // dynamic import GSAP and Lenis (robustly handle default vs named exports)
+  const gsapModule = await import('gsap');
+  const gsap = gsapModule.default || gsapModule.gsap || gsapModule;
+  // import plugins
+  const ScrollTriggerModule = await import('gsap/ScrollTrigger');
+  const ScrollTrigger = ScrollTriggerModule.default || ScrollTriggerModule.ScrollTrigger || ScrollTriggerModule;
+  let CustomEaseModule;
+  try {
+    CustomEaseModule = await import('gsap/CustomEase');
+  } catch (e) {
+    CustomEaseModule = null;
+  }
+  const CustomEase = CustomEaseModule && (CustomEaseModule.default || CustomEaseModule.CustomEase || CustomEaseModule);
+  if (CustomEase) {
+    gsap.registerPlugin(CustomEase);
+    try {
+      CustomEase.create('customEase', 'M0,0 C0.86,0 0.07,1 1,1');
+    } catch (e) {
+      // ignore if already created
+    }
+  }
+
   gsap.registerPlugin(ScrollTrigger);
+
+  const LenisModule = await import('@studio-freight/lenis');
+  const Lenis = LenisModule.default || LenisModule;
 
   // small helper functions and initialization similar to CodePen
   const loadingOverlay = document.getElementById('loading-overlay');
@@ -86,33 +105,25 @@ export async function initPage() {
       counter = 100;
       clearInterval(counterInterval);
       setTimeout(() => {
-        gsap.to(loadingOverlay.querySelector('.loading-counter'), {
+        // fade out counter and overlay
+        const counterEl = loadingOverlay.querySelector('.loading-counter');
+        if (counterEl) {
+          gsap.to(counterEl, { opacity: 0, y: -20, duration: 0.6, ease: 'power2.inOut' });
+        }
+        gsap.to(loadingOverlay, {
           opacity: 0,
-          y: -20,
-          duration: 0.6,
-          ease: 'power2.inOut'
-        });
-        gsap.to(loadingOverlay.childNodes[0], {
-          opacity: 0,
-          y: -20,
-          duration: 0.6,
-          ease: 'power2.inOut',
+          y: '-100%',
+          duration: 1.2,
+          ease: 'power3.inOut',
+          delay: 0.3,
           onComplete: () => {
-            gsap.to(loadingOverlay, {
-              y: '-100%',
-              duration: 1.2,
-              ease: 'power3.inOut',
-              delay: 0.3,
-              onComplete: () => {
-                loadingOverlay.style.display = 'none';
-                animateColumns();
-              }
-            });
+            loadingOverlay.style.display = 'none';
+            animateColumns();
           }
         });
       }, 200);
     }
-    loadingCounter.textContent = `[${Math.floor(counter).toString().padStart(2, '0')}]`;
+    if (loadingCounter) loadingCounter.textContent = `[${Math.floor(counter).toString().padStart(2, '0')}]`;
   }, 30);
 
   // Lenis init
@@ -131,6 +142,7 @@ export async function initPage() {
   });
 
   const duration = 0.64;
+  const parallaxAmount = 5; // move declaration before any scroll-triggered handlers
   const debugInfo = document.getElementById('debug-info');
   const fixedContainer = document.getElementById('fixed-container');
   const fixedSectionElement = document.querySelector('.fixed-section');
@@ -147,43 +159,94 @@ export async function initPage() {
   const progressFill = document.getElementById('progress-fill');
   const currentSectionDisplay = document.getElementById('current-section');
 
+  // Lightweight SplitText replacement: split each featured h3 into word spans
+  const splitTexts = {};
+  featuredContents.forEach((content, index) => {
+    const h3 = content.querySelector('h3');
+    if (!h3) return;
+    const words = h3.textContent.trim().split(/\s+/);
+    h3.textContent = '';
+    const wordEls = [];
+    words.forEach((w) => {
+      const mask = document.createElement('span');
+      mask.className = 'word-mask';
+      mask.style.display = 'inline-block';
+      mask.style.overflow = 'hidden';
+      const word = document.createElement('span');
+      word.className = 'split-word';
+      word.textContent = w + ' ';
+      mask.appendChild(word);
+      h3.appendChild(mask);
+      wordEls.push(word);
+    });
+    splitTexts[`featured-${index}`] = wordEls;
+    // set initial state for non-active
+    if (index !== 0) {
+      gsap.set(wordEls, { yPercent: 100, opacity: 0 });
+    } else {
+      gsap.set(wordEls, { yPercent: 0, opacity: 1 });
+    }
+  });
+
+  // shorten initial loaded stagger for snappier appearance
   function animateColumns() {
     const artistItems = document.querySelectorAll('.artist');
     const categoryItems = document.querySelectorAll('.category');
     artistItems.forEach((item, index) => {
       setTimeout(() => {
         item.classList.add('loaded');
-      }, index * 60);
+      }, index * 45);
     });
     categoryItems.forEach((item, index) => {
       setTimeout(() => {
         item.classList.add('loaded');
-      }, index * 60 + 200);
+      }, index * 45 + 150);
     });
   }
 
-  function updateProgressNumbers() {
-    currentSectionDisplay.textContent = (currentSection + 1).toString().padStart(2, '0');
-  }
-
-  const fixedSectionTop = fixedSectionElement.offsetTop;
-  const fixedSectionHeight = fixedSectionElement.offsetHeight;
+  const fixedSectionTop = fixedSectionElement ? fixedSectionElement.offsetTop : 0;
+  const fixedSectionHeight = fixedSectionElement ? fixedSectionElement.offsetHeight : window.innerHeight * 11; // fallback
   let currentSection = 0;
   let isAnimating = false;
   let isSnapping = false;
   let lastProgress = 0;
   let scrollDirection = 0;
   let sectionPositions = [];
-  for (let i = 0; i < 10; i++) {
-    sectionPositions.push(fixedSectionTop + fixedSectionHeight * i);
+
+  // compute section positions, used for snapping; call on init and on resize
+  function computeSectionPositions() {
+    const top = fixedSectionElement ? fixedSectionElement.offsetTop : 0;
+    const height = fixedSectionElement ? fixedSectionElement.offsetHeight : window.innerHeight * 11;
+    const size = Math.max(1, Math.round(height / 10));
+    sectionPositions = [];
+    for (let i = 0; i < 10; i++) {
+      sectionPositions.push(Math.round(top + size * i));
+    }
   }
+  computeSectionPositions();
+
+  // refresh positions on resize to avoid snapping errors
+  function onResize() {
+    computeSectionPositions();
+    try {
+      ScrollTrigger.refresh();
+    } catch (e) {
+      // ignore if not available yet
+    }
+    try {
+      if (lenis && typeof lenis.resize === 'function') lenis.resize();
+    } catch (e) {}
+  }
+  window.addEventListener('resize', onResize);
+
+  // cleanup: if the page will ever unmount, user can remove listener via window.removeEventListener('resize', onResize)
 
   function navigateToSection(index) {
     if (index === currentSection || isAnimating || isSnapping) return;
     soundManager.enableAudio();
     soundManager.play('click');
     isSnapping = true;
-    const targetPosition = sectionPositions[index];
+    const targetPosition = sectionPositions[index] ?? (sectionPositions[sectionPositions.length - 1]);
     changeSection(index);
     lenis.scrollTo(targetPosition, {
       duration: 0.8,
@@ -194,6 +257,160 @@ export async function initPage() {
       }
     });
   }
+
+  function updateProgressNumbers() {
+    if (currentSectionDisplay) currentSectionDisplay.textContent = (currentSection + 1).toString().padStart(2, '0');
+  }
+
+  const mainScrollTrigger = ScrollTrigger.create({
+    trigger: '.fixed-section',
+    start: 'top top',
+    end: 'bottom bottom',
+    pin: '.fixed-container',
+    pinSpacing: true,
+    onUpdate: (self) => {
+      if (isSnapping) return;
+      const progress = self.progress;
+      const progressDelta = progress - lastProgress;
+      if (Math.abs(progressDelta) > 0.001) {
+        scrollDirection = progressDelta > 0 ? 1 : -1;
+      }
+      const targetSection = Math.min(9, Math.floor(progress * 10));
+      if (targetSection !== currentSection && !isAnimating) {
+        const nextSection = currentSection + (targetSection > currentSection ? 1 : -1);
+        snapToSection(nextSection);
+      }
+      lastProgress = progress;
+      const sectionProgress = currentSection / 9;
+      if (progressFill) progressFill.style.width = `${sectionProgress * 100}%`;
+      if (debugInfo) debugInfo.textContent = `Section: ${currentSection}, Target: ${targetSection}, Progress: ${progress.toFixed(3)}, Direction: ${scrollDirection}`;
+    }
+  });
+
+  function snapToSection(targetSection) {
+    if (targetSection < 0 || targetSection > 9 || targetSection === currentSection || isAnimating) return;
+    isSnapping = true;
+    changeSection(targetSection);
+    const targetPosition = sectionPositions[targetSection];
+    lenis.scrollTo(targetPosition, {
+      duration: 0.6,
+      easing: (t) => 1 - Math.pow(1 - t, 3),
+      lock: true,
+      onComplete: () => {
+        isSnapping = false;
+      }
+    });
+  }
+
+  // refined changeSection using a gsap timeline for coordinated animations
+  function changeSection(newSection) {
+    if (newSection === currentSection || isAnimating) return;
+    isAnimating = true;
+    const isScrollingDown = newSection > currentSection;
+    const previousSection = currentSection;
+    currentSection = newSection;
+    updateProgressNumbers();
+    const sectionProgress = currentSection / 9;
+    if (progressFill) progressFill.style.width = `${sectionProgress * 100}%`;
+
+    // prepare values
+    const ease = CustomEase ? 'customEase' : 'power2.out';
+    const t = gsap.timeline({ defaults: { ease } });
+
+    // hide non-relevant featured contents immediately (keep new and prev)
+    featuredContents.forEach((content, i) => {
+      if (i !== newSection && i !== previousSection) {
+        content.classList.remove('active');
+        gsap.set(content, { visibility: 'hidden', opacity: 0 });
+      }
+    });
+
+    // animate previous featured words out (if any)
+    const prevWords = splitTexts[`featured-${previousSection}`] || [];
+    if (prevWords.length) {
+      t.to(prevWords, {
+        yPercent: isScrollingDown ? -100 : 100,
+        opacity: 0,
+        duration: duration * 0.45,
+        stagger: isScrollingDown ? 0.025 : -0.025
+      }, 0);
+      // hide previous content slightly after
+      t.add(() => {
+        if (featuredContents[previousSection]) {
+          featuredContents[previousSection].classList.remove('active');
+          gsap.set(featuredContents[previousSection], { visibility: 'hidden' });
+        }
+      }, duration * 0.45);
+    }
+
+    // reveal new words with stagger
+    const newWords = splitTexts[`featured-${newSection}`] || [];
+    if (newWords.length) {
+      // ensure content is visible before anim
+      if (featuredContents[newSection]) featuredContents[newSection].classList.add('active');
+      gsap.set(newWords, { yPercent: isScrollingDown ? 100 : -100, opacity: 0 });
+      t.to(newWords, {
+        yPercent: 0,
+        opacity: 1,
+        duration: duration,
+        stagger: isScrollingDown ? 0.045 : -0.045
+      }, Math.max(0, 0.08));
+    }
+
+    // backgrounds: clip / opacity / parallax
+    backgrounds.forEach((bg, i) => {
+      // clear classes so timeline controls visuals
+      gsap.killTweensOf(bg);
+      if (i === newSection) {
+        gsap.set(bg, { opacity: 1, y: 0 });
+        const fromClip = isScrollingDown ? 'inset(100% 0 0 0)' : 'inset(0 0 100% 0)';
+        const toClip = 'inset(0% 0 0 0)';
+        t.set(bg, { clipPath: fromClip }, 0);
+        t.to(bg, { clipPath: toClip, duration }, 0.02);
+        t.set(bg, { className: '+=active' }, 0);
+      } else if (i === previousSection) {
+        t.set(bg, { className: '+=previous' }, 0);
+        t.to(bg, { y: isScrollingDown ? `${parallaxAmount}%` : `-${parallaxAmount}%`, duration: duration * 0.9 }, 0);
+        t.to(bg, { opacity: 0, delay: duration * 0.35, duration: duration * 0.45 }, duration * 0.35);
+        t.add(() => { bg.classList.remove('previous'); gsap.set(bg, { y: 0 }); }, duration * 0.9);
+      } else {
+        t.to(bg, { opacity: 0, duration: duration * 0.3 }, 0);
+      }
+    });
+
+    // artists and categories states
+    artists.forEach((artist, i) => {
+      if (i === newSection) {
+        t.to(artist, { opacity: 1, duration: 0.28 }, 0.02);
+        t.add(() => artist.classList.add('active'), 0.02);
+      } else {
+        t.to(artist, { opacity: 0.3, duration: 0.28 }, 0.02);
+        t.add(() => artist.classList.remove('active'), 0.02);
+      }
+    });
+
+    categories.forEach((category, i) => {
+      if (i === newSection) {
+        t.to(category, { opacity: 1, duration: 0.28 }, 0.02);
+        t.add(() => category.classList.add('active'), 0.02);
+      } else {
+        t.to(category, { opacity: 0.3, duration: 0.28 }, 0.02);
+        t.add(() => category.classList.remove('active'), 0.02);
+      }
+    });
+
+    // when timeline completes, ensure isAnimating cleared and debug
+    t.eventCallback('onComplete', () => {
+      isAnimating = false;
+    });
+
+    // play small click/text sound with slight sync
+    soundManager.play('textChange', 200);
+  }
+
+  document.addEventListener('click', () => {
+    soundManager.enableAudio();
+  }, { once: true });
 
   artists.forEach((artist, index) => {
     artist.addEventListener('click', (e) => {
@@ -216,141 +433,6 @@ export async function initPage() {
       soundManager.play('hover');
     });
   });
-
-  document.addEventListener('click', () => {
-    soundManager.enableAudio();
-  }, { once: true });
-
-  updateProgressNumbers();
-
-  const mainScrollTrigger = ScrollTrigger.create({
-    trigger: '.fixed-section',
-    start: 'top top',
-    end: 'bottom bottom',
-    pin: '.fixed-container',
-    pinSpacing: true,
-    onUpdate: (self) => {
-      if (isSnapping) return;
-      const progress = self.progress;
-      const progressDelta = progress - lastProgress;
-      if (Math.abs(progressDelta) > 0.001) {
-        scrollDirection = progressDelta > 0 ? 1 : -1;
-      }
-      const targetSection = Math.min(9, Math.floor(progress * 10));
-      if (targetSection !== currentSection && !isAnimating) {
-        const nextSection = currentSection + (targetSection > currentSection ? 1 : -1);
-        snapToSection(nextSection);
-      }
-      lastProgress = progress;
-      const sectionProgress = currentSection / 9;
-      progressFill.style.width = `${sectionProgress * 100}%`;
-      debugInfo.textContent = `Section: ${currentSection}, Target: ${targetSection}, Progress: ${progress.toFixed(3)}, Direction: ${scrollDirection}`;
-    }
-  });
-
-  function snapToSection(targetSection) {
-    if (targetSection < 0 || targetSection > 9 || targetSection === currentSection || isAnimating) return;
-    isSnapping = true;
-    changeSection(targetSection);
-    const targetPosition = sectionPositions[targetSection];
-    lenis.scrollTo(targetPosition, {
-      duration: 0.6,
-      easing: (t) => 1 - Math.pow(1 - t, 3),
-      lock: true,
-      onComplete: () => {
-        isSnapping = false;
-      }
-    });
-  }
-
-  const parallaxAmount = 5;
-
-  function changeSection(newSection) {
-    if (newSection === currentSection || isAnimating) return;
-    isAnimating = true;
-    const isScrollingDown = newSection > currentSection;
-    const previousSection = currentSection;
-    currentSection = newSection;
-    updateProgressNumbers();
-    const sectionProgress = currentSection / 9;
-    progressFill.style.width = `${sectionProgress * 100}%`;
-
-    featuredContents.forEach((content, i) => {
-      if (i !== newSection && i !== previousSection) {
-        content.classList.remove('active');
-        gsap.set(content, { visibility: 'hidden', opacity: 0 });
-      }
-    });
-
-    if (previousSection !== null) {
-      const prevWords = null; // simplified - not using SplitText here
-      if (prevWords) {
-        gsap.to(prevWords, {
-          yPercent: isScrollingDown ? -100 : 100,
-          opacity: 0,
-          duration: duration * 0.6,
-          stagger: isScrollingDown ? 0.03 : -0.03,
-          ease: 'power2.out',
-          onComplete: () => {
-            featuredContents[previousSection].classList.remove('active');
-            gsap.set(featuredContents[previousSection], { visibility: 'hidden' });
-          }
-        });
-      }
-    }
-
-    // reveal new section content
-    if (featuredContents[newSection]) {
-      soundManager.play('textChange', 250);
-      featuredContents[newSection].classList.add('active');
-      gsap.set(featuredContents[newSection], { visibility: 'visible', opacity: 1 });
-      gsap.fromTo(
-        featuredContents[newSection],
-        { yPercent: isScrollingDown ? 100 : -100, opacity: 0 },
-        { yPercent: 0, opacity: 1, duration, ease: 'power2.out' }
-      );
-    }
-
-    backgrounds.forEach((bg, i) => {
-      bg.classList.remove('previous', 'active');
-      if (i === newSection) {
-        if (isScrollingDown) {
-          gsap.set(bg, { opacity: 1, y: 0, clipPath: 'inset(100% 0 0 0)' });
-          gsap.to(bg, { clipPath: 'inset(0% 0 0 0)', duration, ease: 'power2.out' });
-        } else {
-          gsap.set(bg, { opacity: 1, y: 0, clipPath: 'inset(0 0 100% 0)' });
-          gsap.to(bg, { clipPath: 'inset(0 0 0% 0)', duration, ease: 'power2.out' });
-        }
-        bg.classList.add('active');
-      } else if (i === previousSection) {
-        bg.classList.add('previous');
-        gsap.to(bg, { y: isScrollingDown ? `${parallaxAmount}%` : `-${parallaxAmount}%`, duration, ease: 'power2.out' });
-        gsap.to(bg, { opacity: 0, delay: duration * 0.5, duration: duration * 0.5, ease: 'power2.out', onComplete: () => { bg.classList.remove('previous'); gsap.set(bg, { y: 0 }); isAnimating = false; } });
-      } else {
-        gsap.to(bg, { opacity: 0, duration: duration * 0.3, ease: 'power2.out' });
-      }
-    });
-
-    artists.forEach((artist, i) => {
-      if (i === newSection) {
-        artist.classList.add('active');
-        gsap.to(artist, { opacity: 1, duration: 0.3, ease: 'power2.out' });
-      } else {
-        artist.classList.remove('active');
-        gsap.to(artist, { opacity: 0.3, duration: 0.3, ease: 'power2.out' });
-      }
-    });
-
-    categories.forEach((category, i) => {
-      if (i === newSection) {
-        category.classList.add('active');
-        gsap.to(category, { opacity: 1, duration: 0.3, ease: 'power2.out' });
-      } else {
-        category.classList.remove('active');
-        gsap.to(category, { opacity: 0.3, duration: 0.3, ease: 'power2.out' });
-      }
-    });
-  }
 
   const progressBarTrigger = ScrollTrigger.create({
     trigger: '.scroll-container',

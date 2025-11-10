@@ -1,10 +1,44 @@
 import React, { useEffect } from 'react'
 import { initPage, soundManager } from './heroLogic'
 
+const imgList = [
+  'flame-glow-blur-001.jpg',
+  'flame-glow-blur-002.jpg',
+  'flame-glow-blur-003.jpg',
+  'flame-glow-blur-004.jpg',
+  'flame-glow-blur-005.jpg',
+  'flame-glow-blur-006.jpg',
+  'flame-glow-blur-007.jpg',
+  'flame-glow-blur-008.jpg',
+  'flame-glow-blur-009.jpg',
+  'flame-glow-blur-010.jpg'
+]
+
+const remoteBase = 'https://assets.codepen.io/7558/'
+
 export default function Hero(){
   useEffect(()=>{
-    initPage().catch(e=>console.error(e))
+    initPage().catch(e=>{
+      console.error(e);
+      const overlay = document.getElementById('loading-overlay');
+      if(overlay) overlay.style.display = 'none';
+    })
   }, [])
+
+  const renderBackgrounds = () => imgList.map((name, i) => {
+    const local = `/assets/${name}`
+    const remote = `${remoteBase}${name}`
+    return (
+      <img
+        key={i}
+        src={local}
+        alt={`Background ${i+1}`}
+        className={`background-image ${i===0? 'active' : ''}`}
+        id={`background-${i+1}`}
+        onError={(e)=>{ e.currentTarget.onerror = null; e.currentTarget.src = remote }}
+      />
+    )
+  })
 
   return (
     <div>
@@ -23,16 +57,7 @@ export default function Hero(){
         <div className="fixed-section" id="fixed-section">
           <div className="fixed-container" id="fixed-container">
             <div className="background-container" id="background-container">
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-001.jpg" alt="Background 1" className="background-image active" id="background-1" />
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-002.jpg" alt="Background 2" className="background-image" id="background-2" />
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-003.jpg" alt="Background 3" className="background-image" id="background-3" />
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-004.jpg" alt="Background 4" className="background-image" id="background-4" />
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-005.jpg" alt="Background 5" className="background-image" id="background-5" />
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-006.jpg" alt="Background 6" className="background-image" id="background-6" />
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-007.jpg" alt="Background 7" className="background-image" id="background-7" />
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-008.jpg" alt="Background 8" className="background-image" id="background-8" />
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-009.jpg" alt="Background 9" className="background-image" id="background-9" />
-              <img src="https://assets.codepen.io/7558/flame-glow-blur-010.jpg" alt="Background 10" className="background-image" id="background-10" />
+              {renderBackgrounds()}
             </div>
             <div className="grid-container">
               <div className="header">
