@@ -359,17 +359,17 @@ export async function initPage() {
 
     // backgrounds: clip / opacity / parallax
     backgrounds.forEach((bg, i) => {
-      // clear classes so timeline controls visuals
       gsap.killTweensOf(bg);
+      bg.classList.remove('active', 'previous');
       if (i === newSection) {
+        bg.classList.add('active');
         gsap.set(bg, { opacity: 1, y: 0 });
         const fromClip = isScrollingDown ? 'inset(100% 0 0 0)' : 'inset(0 0 100% 0)';
         const toClip = 'inset(0% 0 0 0)';
         t.set(bg, { clipPath: fromClip }, 0);
         t.to(bg, { clipPath: toClip, duration }, 0.02);
-        t.set(bg, { className: '+=active' }, 0);
       } else if (i === previousSection) {
-        t.set(bg, { className: '+=previous' }, 0);
+        bg.classList.add('previous');
         t.to(bg, { y: isScrollingDown ? `${parallaxAmount}%` : `-${parallaxAmount}%`, duration: duration * 0.9 }, 0);
         t.to(bg, { opacity: 0, delay: duration * 0.35, duration: duration * 0.45 }, duration * 0.35);
         t.add(() => { bg.classList.remove('previous'); gsap.set(bg, { y: 0 }); }, duration * 0.9);
