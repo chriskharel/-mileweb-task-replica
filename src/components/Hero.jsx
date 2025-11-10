@@ -1,11 +1,24 @@
-import React from 'react'
-import './hero.css'
+import React, { useEffect } from 'react'
+import { initPage, soundManager } from './heroLogic'
 
 export default function Hero(){
+  useEffect(()=>{
+    initPage().catch(e=>console.error(e))
+  }, [])
+
   return (
     <div>
       <div className="loading-overlay" id="loading-overlay">Loading <span className="loading-counter" id="loading-counter">[00]</span></div>
       <div className="debug-info" id="debug-info">Current Section: 0</div>
+      <button className="sound-toggle" id="sound-toggle" onClick={()=>{ soundManager.enableAudio(); document.getElementById('sound-toggle').classList.remove('disabled')}}>
+        <div className="sound-dots">
+          <div className="sound-dot animated"></div>
+          <div className="sound-dot animated"></div>
+          <div className="sound-dot animated"></div>
+          <div className="sound-dot animated"></div>
+        </div>
+      </button>
+
       <div className="scroll-container" id="scroll-container">
         <div className="fixed-section" id="fixed-section">
           <div className="fixed-container" id="fixed-container">
